@@ -1,0 +1,133 @@
+{
+  "name": "Invoice OCR Validation (Phi-3 via Ollama)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "validate-ocr",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f04ce94a-0cf0-4d2c-9c77-0d44dce7c1b7",
+      "name": "Webhook_ValidateOCR",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ],
+      "webhookId": "validate-ocr"
+    },
+    {
+      "parameters": {
+        "functionCode": "const ocrText = ($input.item.json.ocr_text || '').toString();\n\nconst trimmed = ocrText.length > 1000 ? ocrText.slice(0, 1000) : ocrText;\n\nconst prompt = `You are an invoice validation expert. Analyze if the following OCR-extracted text represents a coherent, legitimate invoice or if it's gibberish/fake.\n\nOCR Text:\n${trimmed}\n\nRate the text coherence from 0-100:\n- 0-30: Complete gibberish, random characters, or clearly fake\n- 31-60: Highly fragmented, missing key invoice elements\n- 61-80: Recognizable invoice structure but with OCR errors\n- 81-100: Clear, coherent invoice with proper structure\n\nRespond in JSON format:\n{\n  \\\"sense_rating\\\": <number 0-100>,\n  \\\"reasoning\\\": \\\"<brief explanation>\\\"\n}`;\n\nreturn {\n  json: {\n    formatted_prompt: prompt,\n    original_text_length: ocrText.length\n  }\n};"
+      },
+      "id": "e0507cf6-25f8-4e4d-a4b6-7a3fe6b4c034",
+      "name": "Prepare_Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"model\": \"phi3\",\n  \"prompt\": \"={{$json.formatted_prompt}}\",\n  \"stream\": false,\n  \"temperature\": 0.1\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "a88a4f32-3ab2-40d1-85cf-54548d46fdc4",
+      "name": "Call_Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const modelOutput = ($json.response || '').toString();\n\ntry {\n  const parsed = JSON.parse(modelOutput);\n  const rawRating = parsed.sense_rating;\n  const numericRating = typeof rawRating === 'number' ? rawRating : Number(rawRating);\n\n  return {\n    json: {\n      sense_rating: Number.isFinite(numericRating) ? Math.max(0, Math.min(100, numericRating)) : 50,\n      reasoning: (parsed.reasoning || 'No reasoning provided').toString()\n    }\n  };\n} catch (error) {\n  return {\n    json: {\n      sense_rating: 50,\n      reasoning: 'LLM response parsing failed'\n    }\n  };\n}"
+      },
+      "id": "53c3b9c6-92ad-431f-9967-9cdb82c79408",
+      "name": "Parse_LLM_Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "responseBody": "={\n  \"sense_rating\": {{$json.sense_rating}},\n  \"reasoning\": \"{{$json.reasoning}}\"\n}",
+        "options": {}
+      },
+      "id": "1c20d8d4-2d6b-4a4d-8b83-c8eb07f3c9a0",
+      "name": "Respond_To_Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook_ValidateOCR": {
+      "main": [
+        [
+          {
+            "node": "Prepare_Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare_Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call_Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call_Ollama": {
+      "main": [
+        [
+          {
+            "node": "Parse_LLM_Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse_LLM_Response": {
+      "main": [
+        [
+          {
+            "node": "Respond_To_Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+}
+
+

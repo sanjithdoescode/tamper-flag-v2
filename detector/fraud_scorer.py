@@ -1,30 +1,31 @@
-"""Weighted fraud scoring for invoice tampering detection."""
+"""Invoice fraud scoring (v2.0): metadata-first + LLM validation via n8n."""
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
 from pdf2image import convert_from_path
 from PIL import Image, UnidentifiedImageError
 
-from .ela_detector import InvoiceElaAnalyzer
-from .metadata_checker import InvoiceMetadataInspector
-from .ocr_validator import InvoiceOcrMathValidator
+from .llm_validator import LLMValidator
+from .metadata_checker import EnhancedMetadataChecker
+from .ocr_extractor import OCRExtractor
 
 
 def _final_verdict_from_score(final_score: float) -> str:
-    """Translate a 0–100 fraud score into the required final verdict label."""
+    """Translate a 0–100 risk score into the required verdict label."""
 
-    if final_score >= 65:
+    if final_score >= 70:
         return "HIGH RISK - Likely Tampered"
-    if final_score >= 40:
+    if final_score >= 45:
         return "MEDIUM RISK - Requires Review"
     return "LOW RISK - Appears Authentic"
 
 
-def _shrink_image_to_max_width(invoice_image: Image.Image, *, max_width_px: int) -> Image.Image:
-    """Downscale an image to max_width_px while keeping aspect ratio."""
+def _shrink_to_max_width(invoice_image: Image.Image, *, max_width_px: int) -> Image.Image:
+    """Downscale large images to keep OCR latency predictable."""
 
     if max_width_px <= 0:
         return invoice_image
@@ -38,169 +39,180 @@ def _shrink_image_to_max_width(invoice_image: Image.Image, *, max_width_px: int)
     return invoice_image.resize((int(max_width_px), int(resized_height_px)), Image.Resampling.LANCZOS)
 
 
-def _score_value(result_payload: dict[str, Any], *, fallback: float) -> float:
-    """Best-effort extraction of a numeric score from a detector payload."""
+class FraudScorer:
+    """
+    Complete fraud pipeline for invoice tampering detection.
 
-    try:
-        return float(result_payload.get("score", fallback))
-    except (TypeError, ValueError):
-        return float(fallback)
-
-
-class InvoiceFraudScorer:
-    """Orchestrates ELA, metadata, and OCR checks into a final fraud score."""
+    v2 weights:
+    - metadata_risk: 60%
+    - llm_risk_from_coherence: 40%  (computed as 100 - sense_rating)
+    """
 
     def __init__(
         self,
+        n8n_webhook_url: str = "http://localhost:5678/webhook/validate-ocr",
         *,
-        results_directory: str,
-        public_results_prefix: str | None = "/static/results",
-        max_image_width_px: int = 2000,
         pdf_dpi: int = 200,
+        max_image_width_px: int = 2000,
     ) -> None:
-        """Create a scorer with initialized detectors."""
+        self.metadata_checker = EnhancedMetadataChecker()
+        self.ocr_extractor = OCRExtractor()
+        self.llm_validator = LLMValidator(n8n_webhook_url)
 
-        self.ela_analyzer = InvoiceElaAnalyzer()
-        self.metadata_inspector = InvoiceMetadataInspector()
-        self.ocr_validator = InvoiceOcrMathValidator()
-
-        self.results_directory = str(results_directory)
-        self.public_results_prefix = public_results_prefix
-        self.max_image_width_px = int(max_image_width_px)
+        self.weights = {"metadata": 0.60, "llm": 0.40}
         self.pdf_dpi = int(pdf_dpi)
+        self.max_image_width_px = int(max_image_width_px)
 
-    def analyze_invoice_file(self, invoice_file_path: str) -> dict[str, Any]:
-        """Analyze an invoice file (JPG/PNG/PDF) and return a nested result dict."""
+    def analyze_invoice(self, image_path: str) -> dict[str, Any]:
+        """Analyze an invoice file path (JPG/PNG/PDF)."""
 
-        invoice_path = Path(invoice_file_path)
-        extension = invoice_path.suffix.lower()
-
-        if extension == ".pdf":
-            invoice_image = self._render_pdf_first_page(invoice_path)
-            return self.analyze_invoice_image(invoice_image, is_pdf=True)
-
-        image_load = self._load_image_with_metadata(invoice_path)
-        return self.analyze_invoice_image(
-            image_load["invoice_image"],
-            metadata_override=image_load["metadata_result"],
-        )
-
-    def analyze_invoice_image(
-        self,
-        invoice_image: Image.Image,
-        *,
-        is_pdf: bool = False,
-        metadata_override: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Analyze an already-loaded invoice image (used for PDF first-page rendering)."""
-
-        analysis_image = _shrink_image_to_max_width(invoice_image, max_width_px=self.max_image_width_px)
-
-        ela_result = self._run_ela_check(analysis_image)
-        metadata_result = (
-            metadata_override if metadata_override is not None else self._run_metadata_check(invoice_image, is_pdf=is_pdf)
-        )
-        ocr_result = self._run_ocr_check(analysis_image)
-
-        return self._assemble_fraud_report(ela_result, metadata_result, ocr_result)
-
-    def _assemble_fraud_report(
-        self,
-        ela_result: dict[str, Any],
-        metadata_result: dict[str, Any],
-        ocr_result: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Combine detector scores using the required weights and thresholds."""
-
-        final_score = (
-            _score_value(ela_result, fallback=50.0) * 0.4
-            + _score_value(metadata_result, fallback=50.0) * 0.3
-            + _score_value(ocr_result, fallback=40.0) * 0.3
-        )
-
-        return {
-            "final_score": float(round(final_score, 2)),
-            "verdict": _final_verdict_from_score(final_score),
-            "ela": ela_result,
-            "metadata": metadata_result,
-            "ocr": ocr_result,
-        }
-
-    def _render_pdf_first_page(self, invoice_path: Path) -> Image.Image:
-        """Convert a PDF's first page into a Pillow RGB image."""
+        started_at = time.time()
+        invoice_path = Path(image_path)
 
         try:
-            rendered_pages = convert_from_path(str(invoice_path), dpi=self.pdf_dpi, first_page=1, last_page=1)
-            if not rendered_pages:
-                raise ValueError("PDF conversion returned no pages.")
-            return rendered_pages[0].convert("RGB")
-        except Exception as pdf_error:
-            raise ValueError(f"Failed to convert PDF to image: {pdf_error}") from pdf_error
+            if invoice_path.suffix.lower() == ".pdf":
+                analysis = self._analyze_pdf(invoice_path)
+            else:
+                analysis = self._analyze_single_image(invoice_path)
+        except Exception as analysis_error:  # noqa: BLE001 - API boundary
+            elapsed_ms = int((time.time() - started_at) * 1000)
+            return {
+                "final_score": 50.0,
+                "verdict": "INCONCLUSIVE - Analysis failed",
+                "confidence": "Low (processing error)",
+                "metadata": {"score": 50.0, "error": str(analysis_error)},
+                "llm_validation": {"sense_rating": 50.0, "error": str(analysis_error)},
+                "ocr_text_preview": "",
+                "score_breakdown": {"metadata_contribution": 30.0, "llm_contribution": 20.0, "weights": self.weights},
+                "processing_time_ms": elapsed_ms,
+                "error": str(analysis_error),
+            }
 
-    def _load_image_with_metadata(self, invoice_path: Path) -> dict[str, Any]:
-        """Load an image file and capture metadata before the file handle is released."""
+        analysis["processing_time_ms"] = int((time.time() - started_at) * 1000)
+        return analysis
+
+    def _analyze_single_image(self, invoice_path: Path) -> dict[str, Any]:
+        """Run the v2 pipeline against a single image file."""
 
         try:
             with Image.open(str(invoice_path)) as opened_image:
-                metadata_result = self._run_metadata_check(opened_image, is_pdf=False)
-                return {"invoice_image": opened_image.copy(), "metadata_result": metadata_result}
-        except (OSError, UnidentifiedImageError) as image_error:
-            raise ValueError(f"Failed to read invoice image: {image_error}") from image_error
+                invoice_image = opened_image.convert("RGB")
 
-    def _run_ela_check(self, invoice_image: Image.Image) -> dict[str, Any]:
-        """Run ELA even if upstream steps fail (returns structured error on exception)."""
+            metadata_result = self.metadata_checker.analyze(str(invoice_path), invoice_image=invoice_image)
+            ocr_image = _shrink_to_max_width(invoice_image, max_width_px=self.max_image_width_px)
+            ocr_result = self.ocr_extractor.extract_text(invoice_image=ocr_image)
+        except (OSError, UnidentifiedImageError) as open_error:
+            raise ValueError(f"Failed to read invoice image: {open_error}") from open_error
+
+        llm_validation = self.llm_validator.validate_text(ocr_result.get("raw_text", ""))
+        return self._assemble_report(
+            metadata_result=metadata_result,
+            llm_validation=llm_validation,
+            ocr_text=ocr_result.get("raw_text", ""),
+        )
+
+    def _analyze_pdf(self, invoice_path: Path) -> dict[str, Any]:
+        """Render all PDF pages, score each, and return the worst-case (max risk) page."""
 
         try:
-            return self.ela_analyzer.analyze_invoice_image(
-                invoice_image,
-                self.results_directory,
-                jpeg_quality=90,
-                public_results_prefix=self.public_results_prefix,
+            rendered_pages = convert_from_path(str(invoice_path), dpi=self.pdf_dpi)
+        except Exception as pdf_error:
+            raise ValueError(f"PDF conversion failed: {pdf_error}") from pdf_error
+
+        if not rendered_pages:
+            raise ValueError("PDF conversion returned no pages.")
+
+        page_summaries: list[dict[str, Any]] = []
+        worst_page_report: dict[str, Any] | None = None
+        worst_page_score: float = -1.0
+
+        for page_index, page_image in enumerate(rendered_pages, start=1):
+            rgb_page = page_image.convert("RGB")
+            metadata_result = self.metadata_checker.analyze(str(invoice_path), invoice_image=rgb_page)
+            ocr_image = _shrink_to_max_width(rgb_page, max_width_px=self.max_image_width_px)
+            ocr_result = self.ocr_extractor.extract_text(invoice_image=ocr_image)
+            llm_validation = self.llm_validator.validate_text(ocr_result.get("raw_text", ""))
+
+            page_report = self._assemble_report(
+                metadata_result=metadata_result,
+                llm_validation=llm_validation,
+                ocr_text=ocr_result.get("raw_text", ""),
             )
-        except Exception as ela_error:  # noqa: BLE001 - isolate ELA failures from other checks
-            return {
-                "score": 50.0,
-                "verdict": "INCONCLUSIVE - ELA failed",
-                "visualization_path": None,
-                "metrics": {},
-                "error": str(ela_error),
-            }
 
-    def _run_metadata_check(self, invoice_image: Image.Image, *, is_pdf: bool) -> dict[str, Any]:
-        """Inspect EXIF metadata for images; PDFs have no EXIF so return a fixed result."""
+            page_report["pdf_page_number"] = page_index
+            page_report["pdf_page_count"] = len(rendered_pages)
 
-        if is_pdf:
-            return {
-                "score": 50.0,
-                "verdict": "SUSPICIOUS - No EXIF metadata found",
-                "flags": ["PDF input has no EXIF metadata; metadata checks are limited."],
-                "metadata": {},
-                "error": None,
-            }
+            page_summaries.append(
+                {
+                    "page_number": page_index,
+                    "final_score": page_report.get("final_score"),
+                    "metadata_score": metadata_result.get("score"),
+                    "llm_sense_rating": llm_validation.get("sense_rating"),
+                }
+            )
 
-        try:
-            return self.metadata_inspector.inspect_invoice_image(invoice_image)
-        except Exception as metadata_error:  # noqa: BLE001 - keep pipeline running
-            return {
-                "score": 50.0,
-                "verdict": "INCONCLUSIVE - Metadata inspection failed",
-                "flags": ["Could not extract EXIF metadata."],
-                "metadata": {},
-                "error": str(metadata_error),
-            }
+            page_score = float(page_report.get("final_score", 0.0))
+            if page_score > worst_page_score:
+                worst_page_score = page_score
+                worst_page_report = page_report
 
-    def _run_ocr_check(self, invoice_image: Image.Image) -> dict[str, Any]:
-        """Run OCR and math checks with a tolerant total validation."""
+        assert worst_page_report is not None
+        worst_page_report["pdf_pages"] = page_summaries
+        return worst_page_report
 
-        try:
-            return self.ocr_validator.validate_invoice_image(invoice_image, tolerance_ratio=0.15)
-        except Exception as ocr_error:  # noqa: BLE001 - keep pipeline running
-            return {
-                "score": 40.0,
-                "verdict": "INCONCLUSIVE - OCR failed",
-                "flags": ["OCR validation failed unexpectedly."],
-                "extracted_text": "",
-                "amounts": [],
-                "error": str(ocr_error),
-            }
+    def _assemble_report(
+        self,
+        *,
+        metadata_result: dict[str, Any],
+        llm_validation: dict[str, Any],
+        ocr_text: str,
+    ) -> dict[str, Any]:
+        """Compute final score + verdict, including a CRITICAL metadata override."""
+
+        metadata_score = float(metadata_result.get("score", 50.0))
+        llm_coherence = float(llm_validation.get("sense_rating", 50.0))
+        llm_risk_score = float(max(0.0, min(100.0, 100.0 - llm_coherence)))
+
+        final_score = metadata_score * self.weights["metadata"] + llm_risk_score * self.weights["llm"]
+
+        verdict = self._get_verdict(final_score, metadata_result=metadata_result)
+        confidence = self._calculate_confidence(metadata_score=metadata_score, llm_risk_score=llm_risk_score)
+
+        return {
+            "final_score": round(float(final_score), 2),
+            "verdict": verdict,
+            "confidence": confidence,
+            "metadata": metadata_result,
+            "llm_validation": llm_validation,
+            "ocr_text_preview": (ocr_text or "")[:300],
+            "score_breakdown": {
+                "metadata_contribution": round(metadata_score * self.weights["metadata"], 2),
+                "llm_contribution": round(llm_risk_score * self.weights["llm"], 2),
+                "llm_risk_score": round(llm_risk_score, 2),
+                "weights": dict(self.weights),
+            },
+        }
+
+    def _get_verdict(self, final_score: float, *, metadata_result: dict[str, Any]) -> str:
+        """Determine verdict with context-aware logic."""
+
+        all_flags = metadata_result.get("all_flags") or []
+        if any("CRITICAL" in str(flag) for flag in all_flags):
+            return "HIGH RISK - Critical Metadata Violation"
+        return _final_verdict_from_score(final_score)
+
+    def _calculate_confidence(self, *, metadata_score: float, llm_risk_score: float) -> str:
+        """Assess confidence using agreement between metadata risk and LLM-derived risk."""
+
+        metadata_high_risk = metadata_score > 60
+        llm_high_risk = llm_risk_score > 60
+
+        metadata_low_risk = metadata_score < 40
+        llm_low_risk = llm_risk_score < 40
+
+        if metadata_high_risk and llm_high_risk:
+            return "High (metadata + LLM both indicate tampering)"
+        if metadata_low_risk and llm_low_risk:
+            return "High (metadata + LLM both look normal)"
+        return "Medium (signals disagree - manual review recommended)"
 

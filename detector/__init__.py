@@ -1,18 +1,13 @@
-"""Invoice fraud detection package.
+"""Invoice fraud detection package (v2.0).
 
-This package bundles ELA image forensics, EXIF inspection, and OCR math checks
-for spotting common invoice tampering patterns.
+v2 removes compression-forensics and OCR math heuristics. The pipeline is:
+metadata risk (EXIF) + OCR extraction + LLM semantic validation (via n8n).
 """
 
-from .ela_detector import InvoiceElaAnalyzer
-from .fraud_scorer import InvoiceFraudScorer
-from .metadata_checker import InvoiceMetadataInspector
-from .ocr_validator import InvoiceOcrMathValidator
+from .fraud_scorer import FraudScorer
+from .llm_validator import LLMValidator
+from .metadata_checker import EnhancedMetadataChecker
+from .ocr_extractor import OCRExtractor
 
-__all__ = [
-    "InvoiceElaAnalyzer",
-    "InvoiceFraudScorer",
-    "InvoiceMetadataInspector",
-    "InvoiceOcrMathValidator",
-]
+__all__ = ["EnhancedMetadataChecker", "FraudScorer", "LLMValidator", "OCRExtractor"]
 

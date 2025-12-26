@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from detector.fraud_scorer import InvoiceFraudScorer
+from detector.fraud_scorer import FraudScorer
 
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
@@ -46,26 +46,34 @@ def test_detection_rate_exceeds_70_percent(tmp_path: Path) -> None:
     assert len(legitimate_files) >= 5, f"Need 5+ legitimate samples in {legitimate_dir}"
     assert len(tampered_files) >= 5, f"Need 5+ tampered samples in {tampered_dir}"
 
-    fraud_scorer = InvoiceFraudScorer(
-        results_directory=str(tmp_path / "results"),
-        public_results_prefix=None,
-        max_image_width_px=2000,
+    fraud_scorer = FraudScorer(
+        n8n_webhook_url="http://localhost:0/webhook/validate-ocr",
         pdf_dpi=200,
+        max_image_width_px=2000,
     )
+
+    # Keep tests offline: don't require n8n/Ollama.
+    fraud_scorer.llm_validator.validate_text = lambda _ocr_text: {  # type: ignore[assignment]
+        "sense_rating": 50.0,
+        "reasoning": "Test stub: neutral coherence",
+        "is_coherent": False,
+        "flags": ["Test stub: LLM disabled"],
+        "error": None,
+    }
 
     true_positives = 0
     false_positives = 0
 
     print("\nfile,label,final_score,verdict")
     for tampered_path in tampered_files[:5]:
-        analysis = fraud_scorer.analyze_invoice_file(str(tampered_path))
-        flagged = float(analysis["final_score"]) >= 40.0
+        analysis = fraud_scorer.analyze_invoice(str(tampered_path))
+        flagged = float(analysis["final_score"]) >= 45.0
         true_positives += 1 if flagged else 0
         print(f"{tampered_path.name},tampered,{analysis['final_score']},{analysis['verdict']}")
 
     for legitimate_path in legitimate_files[:5]:
-        analysis = fraud_scorer.analyze_invoice_file(str(legitimate_path))
-        flagged = float(analysis["final_score"]) >= 40.0
+        analysis = fraud_scorer.analyze_invoice(str(legitimate_path))
+        flagged = float(analysis["final_score"]) >= 45.0
         false_positives += 1 if flagged else 0
         print(f"{legitimate_path.name},legitimate,{analysis['final_score']},{analysis['verdict']}")
 

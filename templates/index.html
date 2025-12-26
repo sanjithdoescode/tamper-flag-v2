@@ -3,48 +3,91 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Invoice Tampering Detector</title>
+    <title>Invoice Tampering Detector v2</title>
     <style>
       :root {
-        --panel-border: #e6e6e6;
-        --ink: #1f2328;
-        --muted: #6b7280;
-        --brand: #2563eb;
+        --ink: #0f172a;
+        --muted: #64748b;
+        --panel: rgba(255, 255, 255, 0.92);
+        --border: rgba(15, 23, 42, 0.10);
+        --brand: #4f46e5;
+        --brand2: #7c3aed;
+        --good: #16a34a;
+        --warn: #f59e0b;
+        --bad: #ef4444;
       }
 
       body {
         margin: 0;
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
         color: var(--ink);
-        background: #fafafa;
+        background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 45%, #fdf2f8 100%);
+        min-height: 100vh;
+        padding: 22px;
       }
 
-      .page {
+      .container {
         max-width: 980px;
         margin: 0 auto;
-        padding: 28px 16px 48px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(15, 23, 42, 0.15);
+        backdrop-filter: blur(8px);
       }
 
-      header h1 {
-        margin: 0 0 6px;
+      .header {
+        background: linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%);
+        color: white;
+        padding: 26px 26px 22px;
+      }
+
+      .header h1 {
+        margin: 0;
         font-size: 22px;
         letter-spacing: 0.2px;
       }
 
-      header p {
-        margin: 0;
-        color: var(--muted);
-        line-height: 1.45;
+      .header p {
+        margin: 8px 0 0;
+        opacity: 0.92;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+
+      .statusRow {
+        margin-top: 12px;
+        font-size: 12px;
+        opacity: 0.95;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .statusDot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.65);
+      }
+
+      .statusDot.online {
+        background: var(--good);
+      }
+
+      .statusDot.offline {
+        background: var(--bad);
       }
 
       .grid {
-        margin-top: 18px;
         display: grid;
         grid-template-columns: 1fr;
         gap: 14px;
+        padding: 18px;
       }
 
-      @media (min-width: 900px) {
+      @media (min-width: 920px) {
         .grid {
           grid-template-columns: 420px 1fr;
           align-items: start;
@@ -52,34 +95,35 @@
       }
 
       .panel {
-        background: #fff;
-        border: 1px solid var(--panel-border);
-        border-radius: 12px;
+        background: white;
+        border: 1px solid var(--border);
+        border-radius: 14px;
         padding: 14px;
-        box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
       }
 
       .dropZone {
-        border: 2px dashed #cbd5e1;
-        border-radius: 12px;
-        padding: 18px;
-        text-align: center;
-        background: #f8fafc;
-        transition: border-color 120ms ease, background 120ms ease;
+        border: 2px dashed rgba(79, 70, 229, 0.35);
+        border-radius: 14px;
+        padding: 22px 16px;
+        background: rgba(79, 70, 229, 0.06);
         cursor: pointer;
+        transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+        outline: none;
       }
 
       .dropZone.dragOver {
-        border-color: var(--brand);
-        background: #eef2ff;
+        border-color: rgba(124, 58, 237, 0.8);
+        background: rgba(124, 58, 237, 0.08);
+        transform: translateY(-1px);
       }
 
-      .dropZone strong {
-        display: block;
-        margin-bottom: 6px;
+      .dropTitle {
+        margin: 0;
+        font-weight: 750;
       }
 
-      .dropZone span {
+      .dropHint {
+        margin: 8px 0 0;
         color: var(--muted);
         font-size: 13px;
       }
@@ -95,19 +139,19 @@
       button {
         appearance: none;
         border: 0;
-        border-radius: 10px;
+        border-radius: 12px;
         padding: 10px 14px;
-        font-weight: 600;
+        font-weight: 700;
         cursor: pointer;
       }
 
       button.primary {
-        background: var(--brand);
-        color: #fff;
+        background: linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%);
+        color: white;
       }
 
       button.primary:disabled {
-        background: #93c5fd;
+        opacity: 0.55;
         cursor: not-allowed;
       }
 
@@ -124,176 +168,234 @@
         min-height: 18px;
       }
 
-      .resultHeader {
+      .riskCard {
+        border-radius: 14px;
+        padding: 14px;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+      }
+
+      .riskHigh {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(244, 63, 94, 0.12) 100%);
+      }
+
+      .riskMedium {
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.16) 0%, rgba(251, 191, 36, 0.14) 100%);
+      }
+
+      .riskLow {
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.12) 0%, rgba(22, 163, 74, 0.10) 100%);
+      }
+
+      .riskHeader {
         display: flex;
-        gap: 10px;
         justify-content: space-between;
+        gap: 10px;
         align-items: baseline;
         flex-wrap: wrap;
       }
 
       .scoreBig {
-        font-size: 34px;
-        font-weight: 800;
-        letter-spacing: -0.4px;
         margin: 0;
+        font-size: 44px;
+        font-weight: 900;
+        letter-spacing: -0.6px;
       }
 
-      .verdict {
+      .pill {
+        border: 1px solid rgba(0, 0, 0, 0.12);
+        border-radius: 999px;
+        padding: 2px 10px;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.65);
+      }
+
+      .verdictLine {
+        margin: 8px 0 0;
+        font-weight: 800;
+      }
+
+      .metaLine {
         margin: 6px 0 0;
-        font-weight: 700;
-      }
-
-      .riskBox {
-        padding: 12px;
-        border-radius: 12px;
-        border: 1px solid rgba(0, 0, 0, 0.06);
-      }
-
-      .riskLow {
-        background: #e8f5e9;
-      }
-
-      .riskMedium {
-        background: #fff3e0;
-      }
-
-      .riskHigh {
-        background: #ffebee;
-      }
-
-      details {
-        margin-top: 12px;
-        border: 1px solid var(--panel-border);
-        border-radius: 12px;
-        padding: 10px 12px;
-        background: #fff;
-      }
-
-      summary {
-        cursor: pointer;
-        font-weight: 700;
-      }
-
-      .kv {
-        margin-top: 8px;
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 6px;
-      }
-
-      @media (min-width: 600px) {
-        .kv {
-          grid-template-columns: 1fr 1fr;
-        }
-      }
-
-      .kv div {
         font-size: 13px;
         color: var(--muted);
       }
 
-      .pill {
-        display: inline-block;
-        border: 1px solid rgba(0, 0, 0, 0.12);
-        border-radius: 999px;
-        padding: 2px 8px;
-        font-size: 12px;
-        color: #111827;
-        background: rgba(255, 255, 255, 0.7);
-        margin-left: 8px;
+      .breakdownGrid {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
       }
 
-      ul {
+      @media (min-width: 600px) {
+        .breakdownGrid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      .breakdownCard {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(2, 6, 23, 0.02);
+      }
+
+      .breakdownCard h3 {
+        margin: 0;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+        color: var(--muted);
+      }
+
+      .breakdownScore {
+        margin-top: 6px;
+        font-size: 28px;
+        font-weight: 900;
+      }
+
+      .breakdownSmall {
+        margin-top: 4px;
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.3;
+      }
+
+      details {
+        margin-top: 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: white;
+      }
+
+      summary {
+        cursor: pointer;
+        font-weight: 800;
+      }
+
+      .fieldRow {
+        margin-top: 10px;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(2, 6, 23, 0.015);
+      }
+
+      .fieldRowTitle {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+
+      .fieldName {
+        font-weight: 900;
+        letter-spacing: 0.5px;
+      }
+
+      .fieldScore {
+        font-weight: 900;
+      }
+
+      .fieldFlags {
         margin: 8px 0 0;
         padding-left: 18px;
+        color: var(--muted);
+        font-size: 13px;
       }
 
       pre {
         margin-top: 10px;
         padding: 10px;
-        border-radius: 10px;
-        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.12);
         background: #0b1020;
         color: #e5e7eb;
         overflow: auto;
         font-size: 12px;
         line-height: 1.45;
       }
-
-      img.elaImage {
-        display: block;
-        width: 100%;
-        max-height: 360px;
-        object-fit: contain;
-        margin-top: 10px;
-        border-radius: 10px;
-        border: 1px solid var(--panel-border);
-        background: #f3f4f6;
-      }
     </style>
   </head>
   <body>
-    <div class="page">
-      <header>
-        <h1>Invoice Tampering Detector</h1>
-        <p>Upload an invoice image or PDF. The detector runs ELA, EXIF checks, and OCR consistency rules locally.</p>
-      </header>
+    <div class="container">
+      <div class="header">
+        <h1>Invoice Tampering Detector v2</h1>
+        <p>Metadata-first detection with OCR extraction and local LLM validation via n8n.</p>
+        <div class="statusRow">
+          <span id="n8nDot" class="statusDot"></span>
+          <span id="n8nText">Checking LLM validator connectivity…</span>
+        </div>
+      </div>
 
       <div class="grid">
         <section class="panel">
           <div id="dropZone" class="dropZone" tabindex="0" role="button" aria-label="Upload invoice file">
-            <strong>Drag &amp; drop an invoice here</strong>
-            <span>or click to choose a file (JPG, PNG, PDF)</span>
+            <p class="dropTitle">Drop invoice here or click to browse</p>
+            <p class="dropHint">Supported: JPG, PNG, PDF (max 16MB)</p>
           </div>
 
           <input id="fileInput" type="file" accept=".jpg,.jpeg,.png,.pdf" style="display: none" />
 
           <div class="row">
-            <button id="analyzeButton" class="primary" disabled>Analyze Invoice</button>
+            <button id="analyzeButton" class="primary" disabled>Analyze invoice</button>
             <div id="fileName" class="fileName">No file selected</div>
           </div>
           <div id="statusLine" class="statusLine"></div>
         </section>
 
         <section class="panel">
+          <div id="resultsEmpty" style="color: var(--muted); font-size: 13px; line-height: 1.5">
+            Results will appear here after analysis.
+          </div>
+
           <div id="resultsRoot" style="display: none">
-            <div id="riskBox" class="riskBox">
-              <div class="resultHeader">
+            <div id="riskCard" class="riskCard">
+              <div class="riskHeader">
                 <h2 id="finalScore" class="scoreBig">—</h2>
                 <span id="verdictPill" class="pill">—</span>
               </div>
-              <p id="finalVerdict" class="verdict">—</p>
+              <div id="finalVerdict" class="verdictLine">—</div>
+              <div id="confidenceLine" class="metaLine">—</div>
+              <div id="timingLine" class="metaLine">—</div>
+            </div>
+
+            <div class="breakdownGrid">
+              <div class="breakdownCard">
+                <h3>Metadata risk</h3>
+                <div id="metadataScore" class="breakdownScore">—</div>
+                <div id="metadataBreakdownLine" class="breakdownSmall">—</div>
+              </div>
+              <div class="breakdownCard">
+                <h3>LLM coherence</h3>
+                <div id="llmSense" class="breakdownScore">—</div>
+                <div id="llmBreakdownLine" class="breakdownSmall">—</div>
+              </div>
             </div>
 
             <details open>
-              <summary>ELA (Error Level Analysis)</summary>
-              <div class="kv" id="elaKv"></div>
-              <ul id="elaFlags"></ul>
-              <img id="elaImage" class="elaImage" alt="ELA visualization" style="display: none" />
+              <summary>Metadata field breakdown</summary>
+              <div id="metadataFields"></div>
             </details>
 
             <details>
-              <summary>Metadata (EXIF inspection)</summary>
-              <div class="kv" id="metadataKv"></div>
-              <ul id="metadataFlags"></ul>
+              <summary>LLM reasoning</summary>
+              <div id="llmSummary" style="margin-top: 10px; color: var(--muted); font-size: 13px"></div>
+              <ul id="llmFlags" class="fieldFlags"></ul>
+              <pre id="llmReasoning"></pre>
             </details>
 
             <details>
-              <summary>OCR + math validation</summary>
-              <div class="kv" id="ocrKv"></div>
-              <ul id="ocrFlags"></ul>
-              <pre id="ocrText" style="display: none"></pre>
+              <summary>OCR text preview</summary>
+              <pre id="ocrPreview"></pre>
             </details>
 
             <details>
               <summary>Raw JSON</summary>
               <pre id="rawJson"></pre>
             </details>
-          </div>
-
-          <div id="resultsEmpty" style="color: var(--muted); font-size: 13px; line-height: 1.5">
-            Results will appear here after analysis.
           </div>
         </section>
       </div>
@@ -306,25 +408,29 @@
       const statusLine = document.getElementById("statusLine");
       const fileName = document.getElementById("fileName");
 
+      const n8nDot = document.getElementById("n8nDot");
+      const n8nText = document.getElementById("n8nText");
+
       const resultsRoot = document.getElementById("resultsRoot");
       const resultsEmpty = document.getElementById("resultsEmpty");
 
+      const riskCard = document.getElementById("riskCard");
       const finalScore = document.getElementById("finalScore");
-      const finalVerdict = document.getElementById("finalVerdict");
       const verdictPill = document.getElementById("verdictPill");
-      const riskBox = document.getElementById("riskBox");
+      const finalVerdict = document.getElementById("finalVerdict");
+      const confidenceLine = document.getElementById("confidenceLine");
+      const timingLine = document.getElementById("timingLine");
 
-      const elaKv = document.getElementById("elaKv");
-      const elaFlags = document.getElementById("elaFlags");
-      const elaImage = document.getElementById("elaImage");
+      const metadataScore = document.getElementById("metadataScore");
+      const metadataBreakdownLine = document.getElementById("metadataBreakdownLine");
+      const llmSense = document.getElementById("llmSense");
+      const llmBreakdownLine = document.getElementById("llmBreakdownLine");
 
-      const metadataKv = document.getElementById("metadataKv");
-      const metadataFlags = document.getElementById("metadataFlags");
-
-      const ocrKv = document.getElementById("ocrKv");
-      const ocrFlags = document.getElementById("ocrFlags");
-      const ocrText = document.getElementById("ocrText");
-
+      const metadataFields = document.getElementById("metadataFields");
+      const llmSummary = document.getElementById("llmSummary");
+      const llmFlags = document.getElementById("llmFlags");
+      const llmReasoning = document.getElementById("llmReasoning");
+      const ocrPreview = document.getElementById("ocrPreview");
       const rawJson = document.getElementById("rawJson");
 
       let selectedInvoiceFile = null;
@@ -333,23 +439,74 @@
         statusLine.textContent = message || "";
       }
 
-      function setRiskTheme(verdictText) {
-        riskBox.classList.remove("riskLow", "riskMedium", "riskHigh");
-        if (verdictText.startsWith("HIGH RISK")) riskBox.classList.add("riskHigh");
-        else if (verdictText.startsWith("MEDIUM RISK")) riskBox.classList.add("riskMedium");
-        else riskBox.classList.add("riskLow");
-      }
+      async function refreshN8nStatus() {
+        try {
+          const response = await fetch("/api/health");
+          const payload = await response.json();
+          const isOnline = payload?.components?.n8n_webhook === "operational";
 
-      function setKeyValues(target, entries) {
-        target.innerHTML = "";
-        for (const entry of entries) {
-          const div = document.createElement("div");
-          div.textContent = entry;
-          target.appendChild(div);
+          n8nDot.classList.toggle("online", isOnline);
+          n8nDot.classList.toggle("offline", !isOnline);
+          n8nText.textContent = isOnline ? "LLM validator: online" : "LLM validator: offline (fallback scoring)";
+        } catch (error) {
+          n8nDot.classList.add("offline");
+          n8nText.textContent = "LLM validator: offline (health check failed)";
         }
       }
 
-      function setList(target, entries, emptyMessage) {
+      function applyRiskTheme(scoreNumber) {
+        riskCard.classList.remove("riskHigh", "riskMedium", "riskLow");
+        if (scoreNumber >= 70) riskCard.classList.add("riskHigh");
+        else if (scoreNumber >= 45) riskCard.classList.add("riskMedium");
+        else riskCard.classList.add("riskLow");
+      }
+
+      function formatNumber(value, decimals = 1) {
+        if (typeof value !== "number") return "—";
+        return value.toFixed(decimals);
+      }
+
+      function renderMetadataFields(fieldBreakdown) {
+        metadataFields.innerHTML = "";
+        if (!fieldBreakdown) {
+          metadataFields.textContent = "No metadata field details.";
+          return;
+        }
+
+        for (const [fieldKey, fieldInfo] of Object.entries(fieldBreakdown)) {
+          const fieldContainer = document.createElement("div");
+          fieldContainer.className = "fieldRow";
+
+          const weightPercent = typeof fieldInfo.weight === "number" ? Math.round(fieldInfo.weight * 100) : "—";
+          const scoreText = typeof fieldInfo.score === "number" ? fieldInfo.score.toFixed(1) : "—";
+
+          const header = document.createElement("div");
+          header.className = "fieldRowTitle";
+          header.innerHTML = `<div class="fieldName">${fieldKey.toUpperCase()}</div><div class="fieldScore">${scoreText} (w ${weightPercent}%)</div>`;
+          fieldContainer.appendChild(header);
+
+          const flagList = document.createElement("ul");
+          flagList.className = "fieldFlags";
+
+          const flags = Array.isArray(fieldInfo.flags) ? fieldInfo.flags : [];
+          if (flags.length === 0) {
+            const li = document.createElement("li");
+            li.textContent = "No flags for this field.";
+            flagList.appendChild(li);
+          } else {
+            for (const flagText of flags) {
+              const li = document.createElement("li");
+              li.textContent = flagText;
+              flagList.appendChild(li);
+            }
+          }
+          fieldContainer.appendChild(flagList);
+
+          metadataFields.appendChild(fieldContainer);
+        }
+      }
+
+      function renderList(target, entries, emptyMessage) {
         target.innerHTML = "";
         if (!entries || entries.length === 0) {
           const li = document.createElement("li");
@@ -357,9 +514,9 @@
           target.appendChild(li);
           return;
         }
-        for (const entry of entries) {
+        for (const entryText of entries) {
           const li = document.createElement("li");
-          li.textContent = entry;
+          li.textContent = entryText;
           target.appendChild(li);
         }
       }
@@ -368,70 +525,39 @@
         resultsEmpty.style.display = "none";
         resultsRoot.style.display = "block";
 
-        const scoreValue = typeof payload.final_score === "number" ? payload.final_score.toFixed(2) : String(payload.final_score);
-        finalScore.textContent = scoreValue;
-        finalVerdict.textContent = payload.verdict || "—";
+        const scoreValue = typeof payload.final_score === "number" ? payload.final_score : Number(payload.final_score);
+        finalScore.textContent = formatNumber(scoreValue, 2);
         verdictPill.textContent = payload.verdict || "—";
-        setRiskTheme(payload.verdict || "");
+        finalVerdict.textContent = payload.verdict || "—";
 
-        const ela = payload.ela || {};
-        setKeyValues(elaKv, [
-          `Score: ${ela.score ?? "—"}`,
-          `Verdict: ${ela.verdict ?? "—"}`,
-          `Mean brightness: ${ela.metrics?.brightness_mean ?? "—"}`,
-          `Variance: ${ela.metrics?.brightness_variance ?? "—"}`,
-          `Max diff: ${ela.metrics?.max_pixel_difference ?? "—"}`
-        ]);
+        confidenceLine.textContent = payload.confidence ? `Confidence: ${payload.confidence}` : "Confidence: —";
+        timingLine.textContent = payload.processing_time_ms != null ? `Processed in ${payload.processing_time_ms} ms` : "Processed in —";
 
-        const elaFlagEntries = [];
-        if (ela.error) elaFlagEntries.push(`Error: ${ela.error}`);
-        setList(elaFlags, elaFlagEntries, "No ELA warnings.");
-
-        if (ela.visualization_path) {
-          elaImage.src = ela.visualization_path;
-          elaImage.style.display = "block";
-        } else {
-          elaImage.style.display = "none";
-        }
+        applyRiskTheme(scoreValue);
 
         const metadata = payload.metadata || {};
-        setKeyValues(metadataKv, [
-          `Score: ${metadata.score ?? "—"}`,
-          `Verdict: ${metadata.verdict ?? "—"}`,
-          `Make: ${metadata.metadata?.Make ?? "—"}`,
-          `Model: ${metadata.metadata?.Model ?? "—"}`,
-          `Software: ${metadata.metadata?.Software ?? "—"}`
-        ]);
-        const metadataFlagEntries = [];
-        if (Array.isArray(metadata.flags)) metadataFlagEntries.push(...metadata.flags);
-        if (metadata.error) metadataFlagEntries.push(`Error: ${metadata.error}`);
-        setList(metadataFlags, metadataFlagEntries, "No metadata flags.");
+        metadataScore.textContent = formatNumber(metadata.score, 1);
+        metadataBreakdownLine.textContent = `Weight 60% · Contribution ${formatNumber(payload?.score_breakdown?.metadata_contribution, 2)}`;
 
-        const ocr = payload.ocr || {};
-        setKeyValues(ocrKv, [
-          `Score: ${ocr.score ?? "—"}`,
-          `Verdict: ${ocr.verdict ?? "—"}`,
-          `Amounts detected: ${Array.isArray(ocr.amounts) ? ocr.amounts.length : "—"}`
-        ]);
-        const ocrFlagEntries = [];
-        if (Array.isArray(ocr.flags)) ocrFlagEntries.push(...ocr.flags);
-        if (ocr.error) ocrFlagEntries.push(`Error: ${ocr.error}`);
-        setList(ocrFlags, ocrFlagEntries, "No OCR flags.");
+        const llm = payload.llm_validation || {};
+        llmSense.textContent = formatNumber(llm.sense_rating, 1);
+        llmBreakdownLine.textContent = `Weight 40% · Risk contribution ${formatNumber(payload?.score_breakdown?.llm_contribution, 2)} (risk=${formatNumber(payload?.score_breakdown?.llm_risk_score, 1)})`;
 
-        if (ocr.extracted_text) {
-          ocrText.style.display = "block";
-          ocrText.textContent = ocr.extracted_text;
-        } else {
-          ocrText.style.display = "none";
-        }
+        renderMetadataFields(metadata.field_breakdown);
 
+        const llmStatusText = llm.is_coherent ? "Coherent structure" : "Incoherent / uncertain";
+        llmSummary.textContent = `Assessment: ${llmStatusText}${llm.error ? ` · Error: ${llm.error}` : ""}`;
+        renderList(llmFlags, llm.flags, "No LLM flags.");
+        llmReasoning.textContent = llm.reasoning ? String(llm.reasoning) : "No reasoning provided.";
+
+        ocrPreview.textContent = payload.ocr_text_preview ? String(payload.ocr_text_preview) : "(no OCR text)";
         rawJson.textContent = JSON.stringify(payload, null, 2);
       }
 
       function useFile(file) {
         selectedInvoiceFile = file || null;
         analyzeButton.disabled = !selectedInvoiceFile;
-        fileName.textContent = selectedInvoiceFile ? selectedInvoiceFile.name : "No file selected";
+        fileName.textContent = selectedInvoiceFile ? `Selected: ${selectedInvoiceFile.name}` : "No file selected";
         setStatus("");
       }
 
@@ -461,7 +587,8 @@
         if (!selectedInvoiceFile) return;
 
         analyzeButton.disabled = true;
-        setStatus("Analyzing… (usually < 5 seconds)");
+        analyzeButton.textContent = "Analyzing…";
+        setStatus("Running metadata + OCR + LLM validation…");
 
         try {
           const formData = new FormData();
@@ -480,8 +607,12 @@
           setStatus(error.message || String(error));
         } finally {
           analyzeButton.disabled = false;
+          analyzeButton.textContent = "Analyze invoice";
+          refreshN8nStatus();
         }
       });
+
+      refreshN8nStatus();
     </script>
   </body>
 </html>

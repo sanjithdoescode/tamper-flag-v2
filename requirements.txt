@@ -1,9 +1,21 @@
-Flask>=3.0.0,<4
-flask-cors>=6.0.0
-Pillow>=10.1.0,<11
-opencv-python>=4.8.0.76,<5
+# Core Framework
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# Image Processing (EXIF only - no compression forensics)
+Pillow==10.1.0
+
+# OCR
+opencv-python==4.8.1.78
 pytesseract==0.3.10
-pdf2image>=1.16.3,<2
-numpy==1.24.4
-pytest>=7.4,<9
+numpy==1.26.2
+
+# HTTP for n8n integration
+requests==2.31.0
+
+# PDF handling (optional)
+pdf2image==1.16.3
+
+# Development/Testing
+pytest==7.4.3
 

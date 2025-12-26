@@ -1,53 +1,51 @@
-# Invoice Tampering Detector (Local, Free)
+# Invoice Tampering Detector v2.0
 
-Production-ready **invoice fraud detection** for JPEG/PNG/PDF invoices using:
-- **Error Level Analysis (ELA)** to surface localized edits
-- **EXIF inspection** to spot editing software and metadata inconsistencies
-- **OCR + math validation** to catch amount tampering and inconsistent totals
+Local invoice fraud detection using **metadata forensics** plus **LLM semantic validation** (n8n → Ollama).
 
-No paid APIs. No database. Runs locally.
+## What changed in v2.0
 
----
+### Removed
+- Unreliable compression-forensics approaches that produced high false positives
+- OCR math heuristics (line-item parsing and total checks)
 
-## Architecture (high level)
+### Added
+- **Metadata-first scoring (60%)** with field-level weighting and critical overrides
+- **LLM validation (40%)** by sending OCR text to a local **n8n webhook**, which calls **Phi-3 via Ollama**
+- **Multi-page PDFs**: analyze **all pages**, return the **worst-case (max risk)** page
+
+## Architecture
 
 ```
-Browser_UI
-  |
-  v
-Flask_API (/api/analyze)
-  |
-  v
-InvoiceFraudScorer
-  |-- ELA (Pillow) --------------> score_0_100 + ELA image
-  |-- EXIF metadata (Pillow) ----> score_0_100 + flags
-  |-- OCR + math (OpenCV+Tesseract) -> score_0_100 + flags
-  |
-  v
-Weighted final_score = ela*0.4 + metadata*0.3 + ocr*0.3
-Verdict:
-  0-39  LOW RISK
-  40-64 MEDIUM RISK
-  65-100 HIGH RISK
+Invoice Upload
+  ↓
+Metadata Analysis (risk 0-100, weight 60%)
+  - Software signatures (editors)
+  - DateTime consistency
+  - Device info signals
+  - Thumbnail presence
+  ↓
+OCR Extraction (raw text only)
+  ↓
+LLM Semantic Validation (coherence 0-100)
+  - POST text → n8n webhook
+  - n8n → Ollama (Phi-3)
+  - LLM returns sense_rating (coherence) + reasoning
+  ↓
+Final Risk Score (0-100):
+  risk = metadata_risk*0.60 + (100 - llm_coherence)*0.40
 ```
-
----
 
 ## Installation
 
-### 1) Python deps
-
-> **⚠️ IMPORTANT:** 
-Use ```*Python 3.11```. ```Python 3.14``` has compatibility issues with scientific packages like numpy that require compilation from source.
+### 1) Python dependencies
 
 ```bash
-cd invoice-tampering-detector
-python3.11 -m venv .venv  # Use python3.11, not python
+python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2) System deps (required for OCR + PDF)
+### 2) System dependencies
 
 #### Tesseract OCR
 - Fedora:
@@ -63,19 +61,13 @@ sudo apt-get update
 sudo apt-get install -y tesseract-ocr
 ```
 
-- macOS (Homebrew):
-
-```bash
-brew install tesseract
-```
-
 Verify:
 
 ```bash
 tesseract --version
 ```
 
-#### Poppler (PDF rendering for `pdf2image`)
+#### Poppler (required for PDF rendering via `pdf2image`)
 - Fedora:
 
 ```bash
@@ -88,123 +80,75 @@ sudo dnf install -y poppler-utils
 sudo apt-get install -y poppler-utils
 ```
 
-- macOS (Homebrew):
+### 3) Ollama + Phi-3 (local LLM)
+
+Install Ollama and pull the model:
 
 ```bash
-brew install poppler
+ollama pull phi3
 ```
 
----
-
-## Run (Web UI)
+Start Ollama:
 
 ```bash
-cd invoice-tampering-detector
+ollama serve
+```
+
+### 4) n8n workflow
+
+Start n8n (any local setup is fine). Then import:
+- `n8n_workflow/llm_validation.json`
+
+Activate the workflow. It exposes:
+- Active webhook: `http://localhost:5678/webhook/validate-ocr`
+- Test webhook: `http://localhost:5678/webhook-test/validate-ocr`
+
+## Run
+
+```bash
 python app.py
 ```
 
-Open `http://localhost:5000` and upload an invoice (JPG/PNG/PDF).
+Open:
+- `http://localhost:5000`
 
-ELA visualizations are saved under `static/results/`.
+## Configuration
 
----
+Environment variables:
 
-## Run (API)
+```bash
+export N8N_WEBHOOK_URL=http://localhost:5678/webhook/validate-ocr
+```
+
+## API
+
+### Analyze invoice
 
 ```bash
 curl -s -X POST http://localhost:5000/api/analyze \
-  -F "file=@tests/samples/legitimate/example.jpg" | jq
+  -F "file=@invoice.jpg"
 ```
 
-Response shape:
-
-```json
-{
-  "final_score": 75.5,
-  "verdict": "HIGH RISK - Likely Tampered",
-  "ela": { "...": "..." },
-  "metadata": { "...": "..." },
-  "ocr": { "...": "..." }
-}
-```
-
----
-
-## Testing with your sample invoices
-
-Put at least 5 files in each folder:
-- `tests/samples/legitimate/`
-- `tests/samples/tampered/`
-
-Then run:
+### Health check
 
 ```bash
-cd invoice-tampering-detector
+curl -s http://localhost:5000/api/health
+```
+
+## Notes on scoring
+
+- **Missing EXIF** is treated as suspicious in this build (risk score 75) even for PNG-like inputs. In production, you may want to soften PNG handling depending on your invoice sources.
+- **Critical override**: if metadata shows a `CRITICAL:` software signature (editor), the verdict is forced to **HIGH RISK** regardless of LLM output.
+- **LLM conversion**: the LLM returns coherence. The scorer converts that to risk as `risk = 100 - coherence` so coherent invoices lower risk.
+
+## Testing
+
+```bash
 pytest -q
 ```
 
-The integration test prints a small result table and asserts:
-- **Detection rate > 70%** (tampered invoices flagged as MEDIUM/HIGH risk)
-
----
-
-## How it works (detectors)
-
-### ELA (Pillow)
-- Re-saves the image as JPEG quality=90, then computes the pixel difference.
-- Enhances the difference image to highlight regions that compress differently.
-- Scores from mean brightness + variance using:
-  - `score = min(100, (brightness/255*50) + (variance/1000*50))`
-- If there are **no compression artifacts** (max diff == 0), it returns **score=50** (suspicious).
-
-### Metadata (EXIF)
-- Extracts EXIF tags and checks for:
-  - Editing software (Photoshop/GIMP/Paint.NET) (+30)
-  - `DateTime` != `DateTimeOriginal` (+20)
-  - Missing Make/Model/DateTime (+15)
-  - No EXIF at all => **50** (suspicious)
-
-### OCR + math validation
-- Preprocesses: grayscale → OTSU threshold → median blur
-- OCR via Tesseract, parses amounts with regex:
-  - `\$?\d+[,.]?\d*\.?\d{2}`
-- Scores flags:
-  - <2 amounts (+40)
-  - duplicates (+20)
-  - line-items sum mismatch vs total beyond ±15% (+35)
-
----
-
-## Known limitations
-- **ELA is strongest on JPEG** inputs. PNG screenshots or images with stripped compression history can trigger the “no artifacts” heuristic.
-- **EXIF is often missing** after messaging apps, screenshots, or PDF export; treat metadata as supporting evidence, not proof.
-- **OCR is sensitive to scan quality**. Low-resolution or skewed invoices can increase false positives.
-- **Multi-page PDFs**: only the first page is analyzed (by design for speed).
-
----
-
-## Project layout
-
-```
-invoice-tampering-detector/
-  app.py
-  detector/
-    ela_detector.py
-    metadata_checker.py
-    ocr_validator.py
-    fraud_scorer.py
-  templates/
-    index.html
-  static/
-    results/
-  uploads/
-  tests/
-    test_ela.py
-    test_metadata.py
-    test_integration.py
-    samples/
-      legitimate/
-      tampered/
-```
+Integration tests expect sample folders:
+- `tests/samples/legitimate/`
+- `tests/samples/tampered/`
 
 

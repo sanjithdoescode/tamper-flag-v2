@@ -1,8 +1,14 @@
-"""Flask API for local invoice tampering analysis.
+"""Flask API for local invoice tampering analysis (v2.0).
+
+v2 pipeline:
+- Metadata-first scoring (EXIF) as the primary signal
+- OCR extraction (text only)
+- LLM semantic validation via n8n webhook (local-only)
 
 Endpoints:
-- GET / renders the upload UI
-- POST /api/analyze accepts an invoice file (JPG/PNG/PDF) and returns JSON analysis
+- GET /            : upload UI
+- POST /api/analyze: analyze invoice (JPG/PNG/PDF)
+- GET /api/health  : API + n8n connectivity status
 """
 
 from __future__ import annotations
@@ -12,27 +18,23 @@ import uuid
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
-from flask_cors import CORS
-from pdf2image import convert_from_path
 from PIL import UnidentifiedImageError
 from werkzeug.utils import secure_filename
 
-from detector.fraud_scorer import InvoiceFraudScorer
+from detector.fraud_scorer import FraudScorer
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 UPLOAD_FOLDER = PROJECT_ROOT / "uploads"
-RESULTS_FOLDER = PROJECT_ROOT / "static" / "results"
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
 MAX_UPLOAD_BYTES = 16 * 1024 * 1024
 
 
 def _ensure_runtime_directories() -> None:
-    """Ensure `uploads/` and `static/results/` exist so the app can run locally."""
+    """Ensure `uploads/` exists so the app can run locally."""
 
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
-    RESULTS_FOLDER.mkdir(parents=True, exist_ok=True)
 
 
 def _is_allowed_filename(uploaded_filename: str) -> bool:
@@ -59,31 +61,20 @@ def _save_uploaded_file(uploaded_file) -> Path:
     return destination_path
 
 
-def _convert_pdf_first_page(pdf_path: Path, *, dpi: int = 200):
-    """Convert the first page of a PDF into a Pillow RGB image."""
-
-    try:
-        rendered_pages = convert_from_path(str(pdf_path), dpi=dpi, first_page=1, last_page=1)
-        if not rendered_pages:
-            raise ValueError("PDF conversion returned no pages.")
-        return rendered_pages[0].convert("RGB")
-    except Exception as pdf_error:
-        raise ValueError(f"PDF conversion failed: {pdf_error}") from pdf_error
-
-
 _ensure_runtime_directories()
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
+app.config["N8N_WEBHOOK_URL"] = os.environ.get(
+    "N8N_WEBHOOK_URL",
+    "http://localhost:5678/webhook/validate-ocr",
+)
 
-CORS(app, resources={r"/api/*": {"origins": "*"}})
-
-fraud_scorer = InvoiceFraudScorer(
-    results_directory=str(RESULTS_FOLDER),
-    public_results_prefix="/static/results",
-    max_image_width_px=2000,
+fraud_scorer = FraudScorer(
+    n8n_webhook_url=app.config["N8N_WEBHOOK_URL"],
     pdf_dpi=200,
+    max_image_width_px=2000,
 )
 
 
@@ -108,13 +99,7 @@ def analyze_invoice():
     saved_path: Path | None = None
     try:
         saved_path = _save_uploaded_file(uploaded_file)
-        extension = saved_path.suffix.lower()
-
-        if extension == ".pdf":
-            invoice_image = _convert_pdf_first_page(saved_path, dpi=200)
-            analysis_result = fraud_scorer.analyze_invoice_image(invoice_image, is_pdf=True)
-        else:
-            analysis_result = fraud_scorer.analyze_invoice_file(str(saved_path))
+        analysis_result = fraud_scorer.analyze_invoice(str(saved_path))
 
         return jsonify(analysis_result)
     except (ValueError, UnidentifiedImageError) as client_error:
@@ -129,6 +114,24 @@ def analyze_invoice():
                 os.remove(saved_path)
             except OSError:
                 pass
+
+
+@app.get("/api/health")
+def health_check():
+    """Check API health plus n8n webhook reachability."""
+
+    n8n_ok, n8n_message = fraud_scorer.llm_validator.test_connection()
+    return jsonify(
+        {
+            "status": "healthy" if n8n_ok else "degraded",
+            "components": {
+                "api": "operational",
+                "n8n_webhook": "operational" if n8n_ok else "unavailable",
+                "n8n_message": n8n_message,
+            },
+            "n8n_webhook_url": app.config["N8N_WEBHOOK_URL"],
+        }
+    )
 
 
 if __name__ == "__main__":
