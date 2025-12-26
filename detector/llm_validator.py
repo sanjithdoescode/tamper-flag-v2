@@ -42,6 +42,7 @@ class LLMValidator:
 
         ocr_text = ocr_text or ""
         text_for_llm = ocr_text[:1000] if len(ocr_text) > 1000 else ocr_text
+        sent_preview = text_for_llm[:200]
 
         if len(text_for_llm.strip()) < 50:
             return {
@@ -49,6 +50,8 @@ class LLMValidator:
                 "reasoning": "Insufficient text extracted",
                 "is_coherent": False,
                 "flags": ["Too little text to analyze (<50 chars)"],
+                "sent_text_preview": sent_preview,
+                "sent_text_length": len(text_for_llm),
                 "error": None,
             }
 
@@ -92,6 +95,8 @@ class LLMValidator:
                 "is_coherent": bool(sense_rating > 50),
                 "flags": flags,
                 "error": None,
+                "sent_text_preview": sent_preview,
+                "sent_text_length": len(text_for_llm),
             }
         except requests.exceptions.Timeout:
             return {
@@ -100,6 +105,8 @@ class LLMValidator:
                 "is_coherent": False,
                 "flags": ["LLM validation timed out - using neutral score"],
                 "error": f"Timeout after {self.timeout_seconds} seconds",
+                "sent_text_preview": sent_preview,
+                "sent_text_length": len(text_for_llm),
             }
         except Exception as request_error:  # noqa: BLE001 - API boundary
             return {
@@ -108,6 +115,8 @@ class LLMValidator:
                 "is_coherent": False,
                 "flags": ["LLM validation unavailable - using neutral score"],
                 "error": str(request_error),
+                "sent_text_preview": sent_preview,
+                "sent_text_length": len(text_for_llm),
             }
 
     def test_connection(self) -> tuple[bool, str]:
