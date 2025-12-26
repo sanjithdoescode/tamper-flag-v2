@@ -1,0 +1,199 @@
+{
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "validate-ocr",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "5bf8bf6a-983b-453b-b303-910a68110a53",
+        "name": "Webhook - Receive OCR Text",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1,
+        "position": [
+          -560,
+          -16
+        ],
+        "webhookId": "c32dcd1f-5040-4b24-8489-d7eae838ce77"
+      },
+      {
+        "parameters": {
+          "functionCode": "// Extract OCR text from webhook payload\nconst ocrText = $input.item.json.ocr_text || '';\nconst maxLength = $input.item.json.max_length || 2000;\n\n// Truncate if too long (Gemini input limits)\nconst truncatedText = ocrText.length > maxLength \n  ? ocrText.substring(0, maxLength) + '...'\n  : ocrText;\n\n// Basic validation\nif (!ocrText || ocrText.trim().length < 20) {\n  return {\n    json: {\n      skip_llm: true,\n      sense_rating: 20,\n      reasoning: 'Insufficient text extracted (less than 20 characters)',\n      detected_structure: {\n        has_vendor_info: false,\n        has_line_items: false,\n        has_amounts: false,\n        has_dates: false\n      },\n      confidence: 'high',\n      error: 'Text too short for analysis'\n    }\n  };\n}\n\nreturn {\n  json: {\n    skip_llm: false,\n    ocr_text: truncatedText,\n    original_length: ocrText.length,\n    truncated: ocrText.length > maxLength\n  }\n};"
+        },
+        "id": "3cb4d850-4d25-40dc-afb1-6a51d26dc1ea",
+        "name": "Validate Input",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 1,
+        "position": [
+          -352,
+          -16
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "boolean": [
+              {
+                "value1": "={{$json.skip_llm}}",
+                "value2": true
+              }
+            ]
+          }
+        },
+        "id": "39b5a12e-747a-438f-9321-2cc880c84bfe",
+        "name": "Check Skip LLM",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          -160,
+          -16
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "key",
+                "value": "={{$credentials.apiKey}}"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"Analyze this OCR-extracted invoice text:\\n\\n{{$json.ocr_text}}\"\n        }\n      ]\n    }\n  ],\n  \"systemInstruction\": {\n    \"parts\": [\n      {\n        \"text\": \"# ROLE\\nYou are an expert document forensics analyst specializing in invoice authenticity verification. Your task is to analyze OCR-extracted text and determine if it represents a coherent, legitimate invoice or fabricated/corrupted content.\\n\\n# OBJECTIVE\\nRate the semantic coherence and structural validity of OCR text on a scale from 0-100.\\n\\n# RATING CRITERIA\\n\\n## Score 0-30 (Gibberish/Fake)\\n- Random characters with no discernible meaning\\n- Computer-generated nonsense patterns\\n- Completely fabricated text with no invoice elements\\n- Deliberately obfuscated content\\n\\n## Score 31-60 (Highly Suspicious)\\n- Severe structural issues (missing all key invoice fields)\\n- Incoherent mixing of unrelated text fragments\\n- OCR text that makes no semantic sense even with errors\\n- Critical fields replaced with placeholder text\\n\\n## Score 61-80 (Possible Legitimate with OCR Errors)\\n- Recognizable invoice structure present\\n- Contains typical invoice elements (vendor, amounts, dates)\\n- OCR errors present but underlying document appears real\\n- Text fragmentation but meaningful content recoverable\\n\\n## Score 81-100 (Clear Legitimate Invoice)\\n- Well-structured invoice with clear sections\\n- All critical fields present and coherent\\n- Vendor information, line items, totals logical\\n- Minor OCR errors acceptable if overall structure valid\\n\\n# RESPONSE FORMAT\\n\\nYou MUST respond with ONLY valid JSON in this exact structure:\\n\\n{\\n  \\\"sense_rating\\\": <integer 0-100>,\\n  \\\"reasoning\\\": \\\"<concise explanation 20-50 words>\\\",\\n  \\\"detected_structure\\\": {\\n    \\\"has_vendor_info\\\": <boolean>,\\n    \\\"has_line_items\\\": <boolean>,\\n    \\\"has_amounts\\\": <boolean>,\\n    \\\"has_dates\\\": <boolean>\\n  },\\n  \\\"confidence\\\": \\\"<high|medium|low>\\\"\\n}\\n\\n# CONSTRAINTS\\n\\n- NO markdown formatting in response\\n- NO explanatory text outside JSON\\n- reasoning MUST be 20-50 words maximum\\n- sense_rating MUST be integer between 0-100\\n- Be conservative: err on side of lower scores for ambiguous cases\\n- Distinguish 'bad OCR on real invoice' from 'fake document'\"\n      }\n    ]\n  },\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"topP\": 0.95,\n    \"topK\": 40,\n    \"maxOutputTokens\": 500,\n    \"responseMimeType\": \"application/json\",\n    \"responseSchema\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"sense_rating\": {\n          \"type\": \"integer\",\n          \"minimum\": 0,\n          \"maximum\": 100\n        },\n        \"reasoning\": {\n          \"type\": \"string\"\n        },\n        \"detected_structure\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"has_vendor_info\": {\"type\": \"boolean\"},\n            \"has_line_items\": {\"type\": \"boolean\"},\n            \"has_amounts\": {\"type\": \"boolean\"},\n            \"has_dates\": {\"type\": \"boolean\"}\n          },\n          \"required\": [\"has_vendor_info\", \"has_line_items\", \"has_amounts\", \"has_dates\"]\n        },\n        \"confidence\": {\n          \"type\": \"string\",\n          \"enum\": [\"high\", \"medium\", \"low\"]\n        }\n      },\n      \"required\": [\"sense_rating\", \"reasoning\", \"detected_structure\", \"confidence\"]\n    }\n  }\n}",
+          "options": {
+            "timeout": 15000
+          }
+        },
+        "id": "10c43ded-d613-4497-b860-8a913e70ce2c",
+        "name": "Gemini API - Validate OCR",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4,
+        "position": [
+          32,
+          96
+        ]
+      },
+      {
+        "parameters": {
+          "functionCode": "// Parse Gemini API response\nconst response = $input.item.json;\n\ntry {\n  // Gemini returns: { candidates: [{ content: { parts: [{ text: \"...\" }] } }] }\n  const candidates = response.candidates || [];\n  \n  if (candidates.length === 0) {\n    throw new Error('No candidates in Gemini response');\n  }\n  \n  const content = candidates[0].content;\n  const parts = content.parts || [];\n  \n  if (parts.length === 0) {\n    throw new Error('No parts in content');\n  }\n  \n  // Extract JSON text\n  const jsonText = parts[0].text;\n  \n  // Parse the JSON\n  const result = JSON.parse(jsonText);\n  \n  // Validate required fields\n  if (typeof result.sense_rating !== 'number' || \n      result.sense_rating < 0 || \n      result.sense_rating > 100) {\n    throw new Error('Invalid sense_rating');\n  }\n  \n  return {\n    json: {\n      sense_rating: result.sense_rating,\n      reasoning: result.reasoning || 'No reasoning provided',\n      detected_structure: result.detected_structure || {\n        has_vendor_info: false,\n        has_line_items: false,\n        has_amounts: false,\n        has_dates: false\n      },\n      confidence: result.confidence || 'medium',\n      error: null\n    }\n  };\n  \n} catch (error) {\n  // Fallback on parsing error\n  return {\n    json: {\n      sense_rating: 50,\n      reasoning: `LLM response parsing failed: ${error.message}`,\n      detected_structure: {\n        has_vendor_info: false,\n        has_line_items: false,\n        has_amounts: false,\n        has_dates: false\n      },\n      confidence: 'low',\n      error: error.message\n    }\n  };\n}"
+        },
+        "id": "50d1a097-b28a-48b1-ab6d-a8a7e39f630e",
+        "name": "Parse Gemini Response",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 1,
+        "position": [
+          256,
+          96
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $json }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            }
+          }
+        },
+        "id": "ca902919-edc1-4225-b757-a08ca7c135e1",
+        "name": "Respond to Webhook",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1,
+        "position": [
+          448,
+          -32
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook - Receive OCR Text": {
+        "main": [
+          [
+            {
+              "node": "Validate Input",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validate Input": {
+        "main": [
+          [
+            {
+              "node": "Check Skip LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Skip LLM": {
+        "main": [
+          [
+            {
+              "node": "Respond to Webhook",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Gemini API - Validate OCR",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gemini API - Validate OCR": {
+        "main": [
+          [
+            {
+              "node": "Parse Gemini Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Gemini Response": {
+        "main": [
+          [
+            {
+              "node": "Respond to Webhook",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "pinData": {},
+    "meta": {
+      "instanceId": "da2c2a168330187af9d7fa5a463970666480e6b76cefa06720bb5d4d4c97bc79"
+    }
+  }
