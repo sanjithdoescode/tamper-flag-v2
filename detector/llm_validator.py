@@ -62,7 +62,14 @@ class LLMValidator:
             if response.status_code != 200:
                 raise ValueError(f"n8n returned status {response.status_code}")
 
-            payload = response.json()
+            try:
+                payload = response.json()
+            except ValueError:
+                # n8n should always return JSON; capture raw body for diagnostics
+                raw_body = response.text.strip()
+                raise ValueError(
+                    f"n8n returned non-JSON body (length={len(raw_body)}): {raw_body[:300] or '<empty>'}"
+                ) from None
             raw_rating = payload.get("sense_rating", 50)
             try:
                 sense_rating = _clamp_0_to_100(float(raw_rating))
