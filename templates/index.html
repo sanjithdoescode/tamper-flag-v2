@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Invoice Tampering Detector</title>
+    <style>
+      :root {
+        --panel-border: #e6e6e6;
+        --ink: #1f2328;
+        --muted: #6b7280;
+        --brand: #2563eb;
+      }
+
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+        color: var(--ink);
+        background: #fafafa;
+      }
+
+      .page {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 28px 16px 48px;
+      }
+
+      header h1 {
+        margin: 0 0 6px;
+        font-size: 22px;
+        letter-spacing: 0.2px;
+      }
+
+      header p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .grid {
+        margin-top: 18px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+
+      @media (min-width: 900px) {
+        .grid {
+          grid-template-columns: 420px 1fr;
+          align-items: start;
+        }
+      }
+
+      .panel {
+        background: #fff;
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        padding: 14px;
+        box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
+      }
+
+      .dropZone {
+        border: 2px dashed #cbd5e1;
+        border-radius: 12px;
+        padding: 18px;
+        text-align: center;
+        background: #f8fafc;
+        transition: border-color 120ms ease, background 120ms ease;
+        cursor: pointer;
+      }
+
+      .dropZone.dragOver {
+        border-color: var(--brand);
+        background: #eef2ff;
+      }
+
+      .dropZone strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .dropZone span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        appearance: none;
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: var(--brand);
+        color: #fff;
+      }
+
+      button.primary:disabled {
+        background: #93c5fd;
+        cursor: not-allowed;
+      }
+
+      .fileName {
+        color: var(--muted);
+        font-size: 13px;
+        word-break: break-word;
+      }
+
+      .statusLine {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 13px;
+        min-height: 18px;
+      }
+
+      .resultHeader {
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+
+      .scoreBig {
+        font-size: 34px;
+        font-weight: 800;
+        letter-spacing: -0.4px;
+        margin: 0;
+      }
+
+      .verdict {
+        margin: 6px 0 0;
+        font-weight: 700;
+      }
+
+      .riskBox {
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.06);
+      }
+
+      .riskLow {
+        background: #e8f5e9;
+      }
+
+      .riskMedium {
+        background: #fff3e0;
+      }
+
+      .riskHigh {
+        background: #ffebee;
+      }
+
+      details {
+        margin-top: 12px;
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: #fff;
+      }
+
+      summary {
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      .kv {
+        margin-top: 8px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+
+      @media (min-width: 600px) {
+        .kv {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      .kv div {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .pill {
+        display: inline-block;
+        border: 1px solid rgba(0, 0, 0, 0.12);
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 12px;
+        color: #111827;
+        background: rgba(255, 255, 255, 0.7);
+        margin-left: 8px;
+      }
+
+      ul {
+        margin: 8px 0 0;
+        padding-left: 18px;
+      }
+
+      pre {
+        margin-top: 10px;
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid var(--panel-border);
+        background: #0b1020;
+        color: #e5e7eb;
+        overflow: auto;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      img.elaImage {
+        display: block;
+        width: 100%;
+        max-height: 360px;
+        object-fit: contain;
+        margin-top: 10px;
+        border-radius: 10px;
+        border: 1px solid var(--panel-border);
+        background: #f3f4f6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <h1>Invoice Tampering Detector</h1>
+        <p>Upload an invoice image or PDF. The detector runs ELA, EXIF checks, and OCR consistency rules locally.</p>
+      </header>
+
+      <div class="grid">
+        <section class="panel">
+          <div id="dropZone" class="dropZone" tabindex="0" role="button" aria-label="Upload invoice file">
+            <strong>Drag &amp; drop an invoice here</strong>
+            <span>or click to choose a file (JPG, PNG, PDF)</span>
+          </div>
+
+          <input id="fileInput" type="file" accept=".jpg,.jpeg,.png,.pdf" style="display: none" />
+
+          <div class="row">
+            <button id="analyzeButton" class="primary" disabled>Analyze Invoice</button>
+            <div id="fileName" class="fileName">No file selected</div>
+          </div>
+          <div id="statusLine" class="statusLine"></div>
+        </section>
+
+        <section class="panel">
+          <div id="resultsRoot" style="display: none">
+            <div id="riskBox" class="riskBox">
+              <div class="resultHeader">
+                <h2 id="finalScore" class="scoreBig">—</h2>
+                <span id="verdictPill" class="pill">—</span>
+              </div>
+              <p id="finalVerdict" class="verdict">—</p>
+            </div>
+
+            <details open>
+              <summary>ELA (Error Level Analysis)</summary>
+              <div class="kv" id="elaKv"></div>
+              <ul id="elaFlags"></ul>
+              <img id="elaImage" class="elaImage" alt="ELA visualization" style="display: none" />
+            </details>
+
+            <details>
+              <summary>Metadata (EXIF inspection)</summary>
+              <div class="kv" id="metadataKv"></div>
+              <ul id="metadataFlags"></ul>
+            </details>
+
+            <details>
+              <summary>OCR + math validation</summary>
+              <div class="kv" id="ocrKv"></div>
+              <ul id="ocrFlags"></ul>
+              <pre id="ocrText" style="display: none"></pre>
+            </details>
+
+            <details>
+              <summary>Raw JSON</summary>
+              <pre id="rawJson"></pre>
+            </details>
+          </div>
+
+          <div id="resultsEmpty" style="color: var(--muted); font-size: 13px; line-height: 1.5">
+            Results will appear here after analysis.
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const dropZone = document.getElementById("dropZone");
+      const fileInput = document.getElementById("fileInput");
+      const analyzeButton = document.getElementById("analyzeButton");
+      const statusLine = document.getElementById("statusLine");
+      const fileName = document.getElementById("fileName");
+
+      const resultsRoot = document.getElementById("resultsRoot");
+      const resultsEmpty = document.getElementById("resultsEmpty");
+
+      const finalScore = document.getElementById("finalScore");
+      const finalVerdict = document.getElementById("finalVerdict");
+      const verdictPill = document.getElementById("verdictPill");
+      const riskBox = document.getElementById("riskBox");
+
+      const elaKv = document.getElementById("elaKv");
+      const elaFlags = document.getElementById("elaFlags");
+      const elaImage = document.getElementById("elaImage");
+
+      const metadataKv = document.getElementById("metadataKv");
+      const metadataFlags = document.getElementById("metadataFlags");
+
+      const ocrKv = document.getElementById("ocrKv");
+      const ocrFlags = document.getElementById("ocrFlags");
+      const ocrText = document.getElementById("ocrText");
+
+      const rawJson = document.getElementById("rawJson");
+
+      let selectedInvoiceFile = null;
+
+      function setStatus(message) {
+        statusLine.textContent = message || "";
+      }
+
+      function setRiskTheme(verdictText) {
+        riskBox.classList.remove("riskLow", "riskMedium", "riskHigh");
+        if (verdictText.startsWith("HIGH RISK")) riskBox.classList.add("riskHigh");
+        else if (verdictText.startsWith("MEDIUM RISK")) riskBox.classList.add("riskMedium");
+        else riskBox.classList.add("riskLow");
+      }
+
+      function setKeyValues(target, entries) {
+        target.innerHTML = "";
+        for (const entry of entries) {
+          const div = document.createElement("div");
+          div.textContent = entry;
+          target.appendChild(div);
+        }
+      }
+
+      function setList(target, entries, emptyMessage) {
+        target.innerHTML = "";
+        if (!entries || entries.length === 0) {
+          const li = document.createElement("li");
+          li.textContent = emptyMessage;
+          target.appendChild(li);
+          return;
+        }
+        for (const entry of entries) {
+          const li = document.createElement("li");
+          li.textContent = entry;
+          target.appendChild(li);
+        }
+      }
+
+      function showResults(payload) {
+        resultsEmpty.style.display = "none";
+        resultsRoot.style.display = "block";
+
+        const scoreValue = typeof payload.final_score === "number" ? payload.final_score.toFixed(2) : String(payload.final_score);
+        finalScore.textContent = scoreValue;
+        finalVerdict.textContent = payload.verdict || "—";
+        verdictPill.textContent = payload.verdict || "—";
+        setRiskTheme(payload.verdict || "");
+
+        const ela = payload.ela || {};
+        setKeyValues(elaKv, [
+          `Score: ${ela.score ?? "—"}`,
+          `Verdict: ${ela.verdict ?? "—"}`,
+          `Mean brightness: ${ela.metrics?.brightness_mean ?? "—"}`,
+          `Variance: ${ela.metrics?.brightness_variance ?? "—"}`,
+          `Max diff: ${ela.metrics?.max_pixel_difference ?? "—"}`
+        ]);
+
+        const elaFlagEntries = [];
+        if (ela.error) elaFlagEntries.push(`Error: ${ela.error}`);
+        setList(elaFlags, elaFlagEntries, "No ELA warnings.");
+
+        if (ela.visualization_path) {
+          elaImage.src = ela.visualization_path;
+          elaImage.style.display = "block";
+        } else {
+          elaImage.style.display = "none";
+        }
+
+        const metadata = payload.metadata || {};
+        setKeyValues(metadataKv, [
+          `Score: ${metadata.score ?? "—"}`,
+          `Verdict: ${metadata.verdict ?? "—"}`,
+          `Make: ${metadata.metadata?.Make ?? "—"}`,
+          `Model: ${metadata.metadata?.Model ?? "—"}`,
+          `Software: ${metadata.metadata?.Software ?? "—"}`
+        ]);
+        const metadataFlagEntries = [];
+        if (Array.isArray(metadata.flags)) metadataFlagEntries.push(...metadata.flags);
+        if (metadata.error) metadataFlagEntries.push(`Error: ${metadata.error}`);
+        setList(metadataFlags, metadataFlagEntries, "No metadata flags.");
+
+        const ocr = payload.ocr || {};
+        setKeyValues(ocrKv, [
+          `Score: ${ocr.score ?? "—"}`,
+          `Verdict: ${ocr.verdict ?? "—"}`,
+          `Amounts detected: ${Array.isArray(ocr.amounts) ? ocr.amounts.length : "—"}`
+        ]);
+        const ocrFlagEntries = [];
+        if (Array.isArray(ocr.flags)) ocrFlagEntries.push(...ocr.flags);
+        if (ocr.error) ocrFlagEntries.push(`Error: ${ocr.error}`);
+        setList(ocrFlags, ocrFlagEntries, "No OCR flags.");
+
+        if (ocr.extracted_text) {
+          ocrText.style.display = "block";
+          ocrText.textContent = ocr.extracted_text;
+        } else {
+          ocrText.style.display = "none";
+        }
+
+        rawJson.textContent = JSON.stringify(payload, null, 2);
+      }
+
+      function useFile(file) {
+        selectedInvoiceFile = file || null;
+        analyzeButton.disabled = !selectedInvoiceFile;
+        fileName.textContent = selectedInvoiceFile ? selectedInvoiceFile.name : "No file selected";
+        setStatus("");
+      }
+
+      dropZone.addEventListener("click", () => fileInput.click());
+      dropZone.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") fileInput.click();
+      });
+
+      fileInput.addEventListener("change", (event) => {
+        const file = event.target.files && event.target.files[0];
+        useFile(file);
+      });
+
+      dropZone.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        dropZone.classList.add("dragOver");
+      });
+      dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragOver"));
+      dropZone.addEventListener("drop", (event) => {
+        event.preventDefault();
+        dropZone.classList.remove("dragOver");
+        const file = event.dataTransfer.files && event.dataTransfer.files[0];
+        useFile(file);
+      });
+
+      analyzeButton.addEventListener("click", async () => {
+        if (!selectedInvoiceFile) return;
+
+        analyzeButton.disabled = true;
+        setStatus("Analyzing… (usually < 5 seconds)");
+
+        try {
+          const formData = new FormData();
+          formData.append("file", selectedInvoiceFile);
+
+          const response = await fetch("/api/analyze", { method: "POST", body: formData });
+          const payload = await response.json();
+
+          if (!response.ok) {
+            throw new Error(payload.error || "Analysis failed.");
+          }
+
+          showResults(payload);
+          setStatus("Done.");
+        } catch (error) {
+          setStatus(error.message || String(error));
+        } finally {
+          analyzeButton.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
+
+

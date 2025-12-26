@@ -1,0 +1,9 @@
+Flask>=3.0.0,<4
+flask-cors>=6.0.0
+Pillow>=10.1.0,<11
+opencv-python>=4.8.0.76,<5
+pytesseract==0.3.10
+pdf2image>=1.16.3,<2
+numpy==1.24.4
+pytest>=7.4,<9
+
