@@ -1,7 +1,7 @@
 """LLM-backed OCR semantic validation via n8n (v2.0).
 
-This module NEVER talks to Ollama directly. It posts OCR text to an n8n webhook,
-where the workflow calls the local LLM and returns a structured score.
+This module NEVER talks to Ollama directly. It posts OCR text (plain text body)
+to an n8n webhook, where the workflow calls the local LLM and returns a structured score.
 """
 
 from __future__ import annotations
@@ -58,7 +58,8 @@ class LLMValidator:
         try:
             response = requests.post(
                 self.n8n_webhook_url,
-                json={"ocr_text": text_for_llm, "analysis_type": "invoice_coherence"},
+                data=text_for_llm,
+                headers={"Content-Type": "text/plain; charset=utf-8"},
                 timeout=self.timeout_seconds,
             )
 
