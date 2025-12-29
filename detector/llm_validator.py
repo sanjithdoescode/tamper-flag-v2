@@ -121,11 +121,21 @@ class LLMValidator:
             }
 
     def test_connection(self) -> tuple[bool, str]:
-        """Best-effort check that the n8n webhook endpoint is reachable."""
+        """
+        Best-effort check that the n8n webhook endpoint is reachable.
 
-        webhook_test_url = self.n8n_webhook_url.replace("/webhook/", "/webhook-test/")
+        Uses POST (not GET) because the webhook node only accepts POST.
+        Sends a small plain-text probe so n8n routing matches production.
+        """
+
+        probe_url = self.n8n_webhook_url
         try:
-            response = requests.get(webhook_test_url, timeout=5)
+            response = requests.post(
+                probe_url,
+                data="healthcheck-probe",
+                headers={"Content-Type": "text/plain; charset=utf-8"},
+                timeout=5,
+            )
             if response.status_code < 500:
                 return True, f"n8n reachable ({response.status_code})"
             return False, f"n8n returned {response.status_code}"
